@@ -142,6 +142,16 @@ Open it on your phone. The address is also printed in the logs as `control page 
   with what you're watching. Jump back to live and the extra delay goes away. The page shows this as
   *"paused/rewound +120s (total 140s)"*.
 
+**Where to start:** from watching NFL games on YouTube TV, these delays lined up well, depending on
+YouTube TV's own delay setting:
+
+| YouTube TV delay setting | Odds delay |
+|---|---|
+| Moderate | about 20 s |
+| Decreased | about 10 s |
+
+Your numbers may differ with your connection, the broadcasting network and so on.
+
 **Tuning tip:** wait for a big play (a touchdown or turnover). If the chart reacts before the TV
 shows the play, add delay; if it reacts after, remove some.
 
