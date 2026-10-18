@@ -44,7 +44,9 @@ final class OddsView extends View {
     // Layout (dp). The chart bleeds off the left edge of the screen behind a fade; labels and the
     // brand row stay inside the TV's title-safe area.
     static final float VIEW_W = 600, VIEW_H = 320;
-    private static final float PLOT_L = 0, PLOT_R = 348, PLOT_W = PLOT_R - PLOT_L, Y0 = 44, PLOT_H = 120;
+    /** Overall size of the overlay; layout below is authored at 1.0. */
+    private static final float SCALE = 0.9f;
+    private static final float PLOT_L = 0, PLOT_R = 348, PLOT_W = PLOT_R - PLOT_L, Y0 = 28, PLOT_H = 120;
     private static final float BRAND_X = 60, FADE_W = 96;
     private static final float LBL_GAP = 16, LBL_H = 46;
     private static final long PULSE_MS = 1800;
@@ -134,13 +136,13 @@ final class OddsView extends View {
 
     @Override
     protected void onMeasure(int w, int h) {
-        setMeasuredDimension(Math.round(VIEW_W * d), Math.round(VIEW_H * d));
+        setMeasuredDimension(Math.round(VIEW_W * d * SCALE), Math.round(VIEW_H * d * SCALE));
     }
 
     @Override
     protected void onDraw(Canvas c) {
         c.save();
-        c.scale(d, d);
+        c.scale(d * SCALE, d * SCALE);
         c.drawRect(0, 0, VIEW_W, VIEW_H, bg);
         Frame f = frame;
         if (f != null) {

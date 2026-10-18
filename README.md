@@ -240,6 +240,7 @@ src/com/tvodds/
 |---|---|
 | Default delay / max delay | `OverlayService.DEFAULT_DELAY_S`, `MAX_DELAY_S` |
 | Which leagues are searched, and in what order | `Poly.LEAGUES` (slugs from `GET /v2/leagues`) |
+| Overall overlay size | `OddsView.SCALE` (0.9; 1.0 = authored size) |
 | Position and size of the chart | `OddsView`: `PLOT_R`, `Y0`, `PLOT_H`, `BRAND_X`, `VIEW_W/H` |
 | Left-edge fade length | `OddsView.FADE_W` |
 | Corner gradient strength | the `RadialGradient` colors in the `OddsView` constructor |
