@@ -1,0 +1,11 @@
+# build output and local signing key (build.sh regenerates both)
+build/
+debug.keystore
+
+# scratch screenshots / recordings
+shots/
+*.mp4
+.DS_Store
+
+# Claude Code session folder
+.claude/
