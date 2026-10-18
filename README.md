@@ -119,13 +119,9 @@ an update; your computer stays paired, so `adb devices` reconnects.
 
 ## Daily use
 
-### Turning it on and off
-**Odds Overlay** appears in the Google TV apps row. Opening it toggles the overlay on or off (you'll
-see a short toast message).
+### The phone control page
 
-### Setting the delay (from your phone)
-
-![Control page](docs/control-page.png)
+<img src="docs/control-page.png" alt="Control page" width="320">
 
 The overlay serves a small control page on your home network:
 
@@ -134,9 +130,18 @@ http://<chromecast-ip>:8765
 ```
 
 Open it on your phone. The address is also printed in the logs as `control page at http://…`.
+Every change applies to the TV immediately while the game keeps playing, and is saved on the device.
+
+### Turning it on and off
+
+Use the switch at the top of the phone page. Off hides the overlay but keeps the app running, so the
+page stays reachable to turn it back on. **Odds Overlay** in the Google TV apps row flips the same
+switch (a short message confirms on or off).
+
+### Delay
 
 - **−5 / −1 / +1 / +5** or the slider (0–60 s) set the base delay. The TV updates immediately and
-  the game keeps playing. The setting is saved on the device. The default is **20 s**.
+  the game keeps playing. The default is **20 s**.
 - **Pausing or rewinding is handled automatically.** The overlay tracks YouTube TV's playback
   position. If you pause for 2 minutes, the chart falls 2 minutes further behind, so it stays in sync
   with what you're watching. Jump back to live and the extra delay goes away. The page shows this as
@@ -154,6 +159,21 @@ Your numbers may differ with your connection, the broadcasting network and so on
 
 **Tuning tip:** wait for a big play (a touchdown or turnover). If the chart reacts before the TV
 shows the play, add delay; if it reacts after, remove some.
+
+### Position
+
+Tap a cell in the 3×3 grid to move the overlay to that corner, edge or the center, for example out of
+the way of an MLB or NHL scorebug in the top left. The default is **top left**.
+
+- **Left column:** the chart runs off the left edge of the screen behind a fade.
+- **Middle and right columns:** the whole widget sits on screen, with the labels a small margin from
+  the right edge.
+- **Gradient:** the dark backdrop always radiates from the corner or edge the overlay is anchored to.
+
+### Backdrop
+
+The slider sets how dark the shading behind the chart is: **0%** removes it, **100%** is the default,
+and up to **150%** is darker, which helps over bright fields and ice.
 
 ### The odometer
 
@@ -180,7 +200,7 @@ OverlayService ──(every 2 s)── Poly.find(title)
    ├─ live price                     wss://gateway-ws-markets.polymarket.us/v1/ws/markets
    │     SUBSCRIPTION_TYPE_MARKET_DATA_LITE → currentPx  (falls back to GET /v1/markets/<m>/bbo)
    ├─ delay                          cutoff = now − base delay − DVR lag
-   └─ ControlServer :8765            phone page + /api, /set, /nudge
+   └─ ControlServer :8765            phone page + /api, /set (delay, pos, bg, on), /nudge
    ▼
 OddsView (TYPE_APPLICATION_OVERLAY window, top-left, not focusable or touchable)
    hi-fi chart pipeline → team-color lines → pulsing endpoints → odometer % labels
@@ -253,7 +273,8 @@ src/com/tvodds/
 | Overall overlay size | `OddsView.SCALE` (0.9; 1.0 = authored size) |
 | Position and size of the chart | `OddsView`: `PLOT_R`, `Y0`, `PLOT_H`, `BRAND_X`, `VIEW_W/H` |
 | Left-edge fade length | `OddsView.FADE_W` |
-| Corner gradient strength | the `RadialGradient` colors in the `OddsView` constructor |
+| Gradient shape (strength is on the phone page) | `OddsView.BACKDROP_ALPHAS` and the stops in `setPosition` |
+| Edge margin for middle/right positions | `OddsView.EDGE_MARGIN_X` |
 | Label sizes / fonts | `OddsView` constructor (`name`, `pct`, `caption` paints) |
 | Odometer timing | `OddsView.ROLL_MS`, `flipOffsetFrac` |
 | Pulse speed | `OddsView.PULSE_MS` |

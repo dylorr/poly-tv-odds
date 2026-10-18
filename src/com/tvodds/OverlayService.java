@@ -41,6 +41,7 @@ public class OverlayService extends Service implements ControlServer.Host {
     static final String TAG = Poly.TAG;
     static final String YOUTUBE_TV = "com.google.android.youtube.tvunplugged";
     static volatile boolean running;
+    static final String ACTION_TOGGLE = "com.tvodds.TOGGLE", ACTION_ON = "com.tvodds.ON";
 
     private static final long TITLE_POLL_MS = 2000, REST_FALLBACK_MS = 10_000, TICK_SPACING_S = 2;
     static final int DEFAULT_DELAY_S = 20, MAX_DELAY_S = 120;
@@ -67,6 +68,10 @@ public class OverlayService extends Service implements ControlServer.Host {
     // Delay: base seconds (persisted) + DVR lag measured from YouTube TV's playback position.
     private SharedPreferences prefs;
     private volatile int delayS = DEFAULT_DELAY_S;
+    private volatile int position; // 3×3 grid, 0 = top-left (default) … 8 = bottom-right
+    private volatile int backdropPct = 100; // corner gradient strength, 0–150%
+    private volatile boolean enabled = true; // on/off switch: off hides the overlay, keeps the control page up
+    private WindowManager.LayoutParams lp;
     private volatile long dvrMs;
     private volatile boolean playing;
     private long minLagMs = Long.MAX_VALUE;
@@ -88,20 +93,25 @@ public class OverlayService extends Service implements ControlServer.Host {
         wm = getSystemService(WindowManager.class);
         view = new OddsView(this);
         view.setAlpha(0f);
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+        lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.START;
         lp.setTitle("tvodds");
+        prefs = getSharedPreferences("tvodds", MODE_PRIVATE);
+        position = prefs.getInt("pos", 0);
+        backdropPct = prefs.getInt("bg", 100);
+        enabled = prefs.getBoolean("on", true);
+        lp.gravity = gravityFor(position);
+        view.setBackdrop(backdropPct);
+        view.setPosition(position);
         wm.addView(view, lp);
 
         netThread = new HandlerThread("tvodds-net");
         netThread.start();
         net = new Handler(netThread.getLooper());
-        prefs = getSharedPreferences("tvodds", MODE_PRIVATE);
         delayS = prefs.getInt("delay_s", DEFAULT_DELAY_S);
         net.post(this::tick);
         startWs();
@@ -113,6 +123,9 @@ public class OverlayService extends Service implements ControlServer.Host {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        String action = intent != null ? intent.getAction() : null;
+        if (ACTION_TOGGLE.equals(action)) setEnabled(!enabled);
+        else if (ACTION_ON.equals(action)) setEnabled(true);
         return START_STICKY;
     }
 
@@ -243,7 +256,7 @@ public class OverlayService extends Service implements ControlServer.Host {
             double cutoff = System.currentTimeMillis() / 1000.0 - delayS - dvrMs / 1000.0;
             int n = 0;
             while (n < ticks.size() && ticks.get(n)[0] <= cutoff) n++;
-            if (playing && game != null && n > 0) {
+            if (enabled && playing && game != null && n > 0) {
                 s = new OddsView.Snap();
                 s.awayName = game.away.name;
                 s.homeName = game.home.name;
@@ -320,10 +333,65 @@ public class OverlayService extends Service implements ControlServer.Host {
     }
 
     @Override
+    public int position() {
+        return position;
+    }
+
+    @Override
+    public void setPosition(int pos) {
+        if (pos < 0 || pos > 8) return;
+        position = pos;
+        prefs.edit().putInt("pos", pos).apply();
+        Log.i(TAG, "position set to " + pos);
+        main.post(() -> {
+            lp.gravity = gravityFor(pos);
+            view.setPosition(pos);
+            try { wm.updateViewLayout(view, lp); } catch (Exception e) { Log.w(TAG, "relayout: " + e); }
+        });
+    }
+
+    @Override
+    public boolean enabled() {
+        return enabled;
+    }
+
+    @Override
+    public void setEnabled(boolean on) {
+        enabled = on;
+        prefs.edit().putBoolean("on", on).apply();
+        Log.i(TAG, "overlay " + (on ? "on" : "off"));
+        render();
+    }
+
+    @Override
+    public int backdrop() {
+        return backdropPct;
+    }
+
+    @Override
+    public void setBackdrop(int percent) {
+        backdropPct = Math.max(0, Math.min(150, percent));
+        prefs.edit().putInt("bg", backdropPct).apply();
+        Log.i(TAG, "backdrop set to " + backdropPct + "%");
+        int p = backdropPct;
+        main.post(() -> view.setBackdrop(p));
+    }
+
+    /** Window anchor for a 3×3 grid cell: rows top/center/bottom × columns start/center/end. */
+    private static int gravityFor(int pos) {
+        int v = pos / 3 == 0 ? Gravity.TOP : pos / 3 == 1 ? Gravity.CENTER_VERTICAL : Gravity.BOTTOM;
+        int h = pos % 3 == 0 ? Gravity.START : pos % 3 == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.END;
+        return v | h;
+    }
+
+    @Override
     public String statusJson() {
         JSONObject j = new JSONObject();
         try {
             j.put("delay", delayS);
+            j.put("pos", position);
+            j.put("bg", backdropPct);
+            j.put("on", enabled);
             j.put("dvr", Math.round(dvrMs / 1000.0));
             j.put("playing", playing);
             Poly.Game g;

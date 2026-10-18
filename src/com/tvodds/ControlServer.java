@@ -16,7 +16,7 @@ import java.util.Collections;
 
 /**
  * Tiny LAN-only control page for tuning the odds delay from a phone while the game keeps playing:
- * http://<chromecast-ip>:8765. Routes: / (page), /api (status JSON), /set?delay=N, /nudge?by=±N.
+ * http://<chromecast-ip>:8765. Routes: / (page), /api (status JSON), /set?delay=N&pos=0..8&bg=0..150&on=0|1, /nudge?by=±N.
  */
 final class ControlServer implements Runnable {
     static final int PORT = 8765;
@@ -24,7 +24,16 @@ final class ControlServer implements Runnable {
     interface Host {
         int delay();
         void setDelay(int seconds);
-        /** Status JSON: {"delay":12,"dvr":0,"game":"…"}. */
+        /** Grid cell 0..8 (row-major, 0 = top-left). */
+        int position();
+        void setPosition(int pos);
+        /** On/off switch: off hides the overlay but keeps this page reachable. */
+        boolean enabled();
+        void setEnabled(boolean on);
+        /** Corner gradient strength in percent, 0–150 (100 = default). */
+        int backdrop();
+        void setBackdrop(int percent);
+        /** Status JSON: {"delay":20,"pos":0,"dvr":0,"game":"…"}. */
         String statusJson();
     }
 
@@ -82,6 +91,12 @@ final class ControlServer implements Runnable {
             case "/set":
                 Integer v = intParam(query, "delay");
                 if (v != null) host.setDelay(v);
+                Integer pos = intParam(query, "pos");
+                if (pos != null) host.setPosition(pos);
+                Integer bg = intParam(query, "bg");
+                if (bg != null) host.setBackdrop(bg);
+                Integer on = intParam(query, "on");
+                if (on != null) host.setEnabled(on != 0);
                 respond(s, "application/json", host.statusJson());
                 return;
             case "/nudge":
@@ -138,7 +153,7 @@ final class ControlServer implements Runnable {
     private static final String PAGE = """
             <!doctype html><html><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-            <meta name="theme-color" content="#0b0d10"><title>Odds Delay</title>
+            <meta name="theme-color" content="#0b0d10"><title>Live Odds overlay</title>
             <style>
               :root{--bg:#0b0d10;--card:#15181d;--line:#262a31;--text:#f2f4f7;--dim:#8b939e;--accent:#2e7cf6}
               *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -159,8 +174,24 @@ final class ControlServer implements Runnable {
               .status{margin-top:18px;font-size:14px;color:var(--dim)}
               .status b{color:var(--text);font-weight:600}
               .hint{margin-top:22px;color:var(--dim);font-size:13px}
+              h2{font-size:15px;font-weight:600;color:var(--dim);letter-spacing:.02em;margin:26px 0 12px}
+              .screen{aspect-ratio:16/9;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);
+                gap:8px;padding:10px;border:2px solid var(--line);border-radius:12px;background:#0f1216}
+              .cell{border-radius:8px;border:1px solid var(--line);background:#1a1e24;display:flex;align-items:center;
+                justify-content:center;font-size:12px;color:var(--dim);touch-action:manipulation;cursor:pointer}
+              .cell.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+              .cell.on::after{content:'Odds'}
+              .switchrow{display:flex;align-items:center;justify-content:space-between;margin:0 0 18px}
+              .switchrow h1{margin:0}
+              .sw{position:relative;width:56px;height:32px;border-radius:16px;background:#2a2f37;border:1px solid var(--line);
+                transition:background .2s;cursor:pointer;touch-action:manipulation;flex:none}
+              .sw::after{content:'';position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;
+                transition:transform .2s}
+              .sw.on{background:#2fbf71;border-color:#2fbf71}
+              .sw.on::after{transform:translateX(24px)}
+              body.off .card,body.off h2,body.off .hint{opacity:.45}
             </style></head><body><main>
-              <h1>Live Odds overlay · delay</h1>
+              <div class="switchrow"><h1>Live Odds overlay <span id="st"></span></h1><div class="sw" id="sw" role="switch" aria-label="Overlay on/off"></div></div>
               <div class="card">
                 <div class="big"><span id="d">–</span><small>s</small></div>
                 <div class="sub">The chart shows the market this far behind live, to line up with the broadcast.</div>
@@ -173,17 +204,39 @@ final class ControlServer implements Runnable {
                 <div class="status" id="s"></div>
               </div>
               <div class="hint">Pausing or rewinding on the TV adds to this automatically and drops back when you return to live.</div>
+              <h2>Position</h2>
+              <div class="card">
+                <div class="screen" id="g"></div>
+                <div class="sub" style="margin:14px 0 0">Move the overlay out of the way of the broadcast's scorebug.</div>
+              </div>
+              <h2>Backdrop <span id="bv" style="float:right;color:var(--text)"></span></h2>
+              <div class="card">
+                <input id="b" type="range" min="0" max="150" step="5" style="margin:4px 0 4px">
+                <div class="scale" style="position:relative"><span>None</span><span style="position:absolute;left:66.7%;transform:translateX(-50%)">Default</span><span>Darker</span></div>
+                <div class="sub" style="margin:14px 0 0">How dark the shading behind the chart is. Raise it for bright fields and ice.</div>
+              </div>
             </main><script>
-              const d=document.getElementById('d'),r=document.getElementById('r'),s=document.getElementById('s');
+              const d=document.getElementById('d'),r=document.getElementById('r'),s=document.getElementById('s'),g=document.getElementById('g');
+              const sw=document.getElementById('sw'),st=document.getElementById('st');
+              sw.onclick=()=>call('/set?on='+(sw.classList.contains('on')?0:1));
+              const b=document.getElementById('b'),bv=document.getElementById('bv');let bDrag=false;
+              b.oninput=()=>{bDrag=true;bv.textContent=b.value+'%'};
+              b.onchange=()=>{bDrag=false;call('/set?bg='+b.value)};
+              const cells=[...Array(9)].map((_,i)=>{const c=document.createElement('div');c.className='cell';
+                c.onclick=()=>call('/set?pos='+i);g.appendChild(c);return c;});
               let dragging=false;
               function show(j){d.textContent=j.delay;if(!dragging)r.value=j.delay;
+                cells.forEach((c,i)=>c.classList.toggle('on',i===j.pos));
+                if(!bDrag){b.value=j.bg;bv.textContent=j.bg+'%';}
+                sw.classList.toggle('on',j.on);sw.setAttribute('aria-checked',j.on);
+                st.textContent=j.on?'· on':'· off';document.body.classList.toggle('off',!j.on);
                 s.innerHTML=(j.game?'Watching <b>'+j.game+'</b>':'No game matched right now')+
                   (j.dvr>0?' · paused/rewound <b>+'+j.dvr+'s</b> (total '+(j.delay+j.dvr)+'s)':'');}
               async function call(u){try{show(await (await fetch(u)).json())}catch(e){s.textContent='Overlay not reachable'}}
               document.querySelectorAll('[data-by]').forEach(b=>b.onclick=()=>call('/nudge?by='+b.dataset.by));
               r.oninput=()=>{dragging=true;d.textContent=r.value};
               r.onchange=()=>{dragging=false;call('/set?delay='+r.value)};
-              call('/api');setInterval(()=>{if(!dragging)call('/api')},1000);
+              call('/api');setInterval(()=>{if(!dragging&&!bDrag)call('/api')},1000);
             </script></body></html>
             """;
 }

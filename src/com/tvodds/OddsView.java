@@ -39,6 +39,8 @@ final class OddsView extends View {
         float awayY, homeY, awayTop, homeTop;
         int awayColor, homeColor;
         String awayName, homeName, awayPct, homePct;
+        /** Label column width for this game: widest team name or "100%" (fixed per game, so no jitter). */
+        float lblW;
     }
 
     // Layout (dp). The chart bleeds off the left edge of the screen behind a fade; labels and the
@@ -49,6 +51,10 @@ final class OddsView extends View {
     private static final float PLOT_L = 0, PLOT_R = 348, PLOT_W = PLOT_R - PLOT_L, Y0 = 28, PLOT_H = 120;
     private static final float BRAND_X = 60, FADE_W = 96;
     private static final float LBL_GAP = 16, LBL_H = 46;
+    // Content extents (for placing it in the 3×3 grid): labels may ride 14dp above the plot, the brand
+    // row ends ~40dp below it, and the label column is at most ~104dp wide ("Commanders", "100%").
+    private static final float CONTENT_TOP = Y0 - 14, CONTENT_BOTTOM = Y0 + PLOT_H + 40;
+    private static final float CONTENT_RIGHT = PLOT_R + LBL_GAP + 104, EDGE_MARGIN_X = 36;
     private static final long PULSE_MS = 1800;
 
     // The logo PNG is the mark's 42.7×10 viewBox; glyph baseline at y≈6.82, cap top at y≈2.26.
@@ -63,20 +69,19 @@ final class OddsView extends View {
     private final Paint logoPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Bitmap logo;
     private final RectF logoDst = new RectF();
+    // Grid position (column/row 0..2) and the resulting content offset inside the view.
+    private int col, row;
+    private float offX, offY;
+    /** Backdrop strength: 1 = the authored gradient, 0 = none, up to 1.5 = darker (alphas clamp at opaque). */
+    private float backdrop = 1f;
+    private static final int[] BACKDROP_ALPHAS = {0xC8, 0xA0, 0x48, 0x00};
 
     OddsView(Context c) {
         super(c);
         d = getResources().getDisplayMetrics().density;
         setLayerType(LAYER_TYPE_HARDWARE, null);
 
-        // Subtle elliptical falloff from the screen corner: no hard edges anywhere.
-        RadialGradient g = new RadialGradient(0, 0, 1,
-                new int[] {0xC8000000, 0xA0000000, 0x48000000, 0x00000000},
-                new float[] {0f, 0.5f, 0.8f, 1f}, Shader.TileMode.CLAMP);
-        Matrix m = new Matrix();
-        m.setScale(VIEW_W, VIEW_H);
-        g.setLocalMatrix(m);
-        bg.setShader(g);
+        setPosition(0);
 
         line.setStyle(Paint.Style.STROKE);
         line.setStrokeWidth(Chart.STROKE);
@@ -134,6 +139,39 @@ final class OddsView extends View {
         invalidate();
     }
 
+    /**
+     * Places the overlay in a 3×3 grid (0 = top-left … 8 = bottom-right). The window itself is
+     * anchored by the service; this shifts the content inside it and re-aims the backdrop gradient.
+     * Left column: the chart bleeds off the screen edge. Middle/right: the whole widget sits inside,
+     * labels {@link #EDGE_MARGIN_X} from the right edge.
+     */
+    void setPosition(int pos) {
+        col = Math.max(0, Math.min(2, pos % 3));
+        row = Math.max(0, Math.min(2, pos / 3));
+        offX = col == 0 ? 0 : col == 1 ? (VIEW_W - CONTENT_RIGHT) / 2 : VIEW_W - EDGE_MARGIN_X - CONTENT_RIGHT;
+        offY = row == 0 ? 0 : row == 1 ? (VIEW_H - CONTENT_TOP - CONTENT_BOTTOM) / 2 : VIEW_H - CONTENT_TOP - CONTENT_BOTTOM;
+
+        // Subtle elliptical falloff from the anchoring corner/edge (or center): it reaches zero
+        // before every view edge, so there are no hard edges anywhere.
+        float cx = col == 0 ? 0 : col == 1 ? VIEW_W / 2 : VIEW_W, rx = col == 1 ? VIEW_W / 2 : VIEW_W;
+        float cy = row == 0 ? 0 : row == 1 ? VIEW_H / 2 : VIEW_H, ry = row == 1 ? VIEW_H / 2 : VIEW_H;
+        int[] colors = new int[BACKDROP_ALPHAS.length];
+        for (int i = 0; i < colors.length; i++) colors[i] = Math.min(255, Math.round(BACKDROP_ALPHAS[i] * backdrop)) << 24;
+        RadialGradient g = new RadialGradient(0, 0, 1, colors, new float[] {0f, 0.5f, 0.8f, 1f}, Shader.TileMode.CLAMP);
+        Matrix m = new Matrix();
+        m.setScale(rx, ry);
+        m.postTranslate(cx, cy);
+        g.setLocalMatrix(m);
+        bg.setShader(g);
+        invalidate();
+    }
+
+    /** Backdrop strength in percent (0–150); rebuilds the gradient at the current position. */
+    void setBackdrop(int percent) {
+        backdrop = Math.max(0, Math.min(150, percent)) / 100f;
+        setPosition(row * 3 + col);
+    }
+
     @Override
     protected void onMeasure(int w, int h) {
         setMeasuredDimension(Math.round(VIEW_W * d * SCALE), Math.round(VIEW_H * d * SCALE));
@@ -146,7 +184,14 @@ final class OddsView extends View {
         c.drawRect(0, 0, VIEW_W, VIEW_H, bg);
         Frame f = frame;
         if (f != null) {
+            c.save();
+            // Middle/right columns size to this game's real label column so the labels sit
+            // EDGE_MARGIN_X from the screen edge (left column bleeds off the edge instead).
+            float contentRight = PLOT_R + LBL_GAP + f.lblW;
+            float x = col == 0 ? 0 : col == 1 ? (VIEW_W - contentRight) / 2 : VIEW_W - EDGE_MARGIN_X - contentRight;
+            c.translate(x, offY);
             drawFrame(c, f);
+            c.restore();
             if (getAlpha() > 0) postInvalidateOnAnimation(); // keep the endpoint pulse running
         }
         c.restore();
@@ -204,6 +249,7 @@ final class OddsView extends View {
         f.homePct = (100 - awayPct) + "%";
         f.awayName = s.awayName;
         f.homeName = s.homeName;
+        f.lblW = Math.max(pct.measureText("100%"), Math.max(name.measureText(s.awayName), name.measureText(s.homeName)));
         float awayTop = f.awayY - 8, homeTop = f.homeY - 8, minSep = LBL_H + 4;
         if (Math.abs(awayTop - homeTop) < minSep) {
             float mid = (awayTop + homeTop) / 2;
